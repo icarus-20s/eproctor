@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer utilities {
+  .bg-custom-pattern {
+    --s: 60px;
+    --c1: #ffffff;
+    --c2: #cceeff;
+    --_g: radial-gradient(
+      25% 25% at 25% 25%,
+      var(--c1) 99%,
+      rgba(0, 0, 0, 0) 101%
+    );
+    background: 
+      var(--_g) var(--s) var(--s) / calc(2 * var(--s)) calc(2 * var(--s)),
+      var(--_g) 0 0 / calc(2 * var(--s)) calc(2 * var(--s)),
+      radial-gradient(50% 50%, var(--c2) 98%, rgba(0, 0, 0, 0)) 0 0 / var(--s) var(--s),
+      repeating-conic-gradient(var(--c2) 0 50%, var(--c1) 0 100%) calc(0.5 * var(--s)) 0 / calc(2 * var(--s)) var(--s);
+  }
+  .bg-custom-login-pattern {
+    --s: 200px; /* control the size */
+    --c1: #1d1d1d;
+    --c2: #4e4f51;
+    --c3: #3c3c3c;
+
+    background: repeating-conic-gradient(
+          from 30deg,
+          #0000 0 120deg,
+          var(--c3) 0 180deg
+        )
+        calc(0.5 * var(--s)) calc(0.5 * var(--s) * 0.577),
+      repeating-conic-gradient(
+        from 30deg,
+        var(--c1) 0 60deg,
+        var(--c2) 0 120deg,
+        var(--c3) 0 180deg
+      );
+    background-size: var(--s) calc(var(--s) * 0.577);
+  }
+  .bg-profile{
+    --color: #E1E1E1;
+    background-color: #F3F3F3;
+    background-image: linear-gradient(
+        0deg, 
+        transparent 24%, 
+        var(--color) 25%, 
+        var(--color) 26%, 
+        transparent 27%, 
+        transparent 74%, 
+        var(--color) 75%, 
+        var(--color) 76%, 
+        transparent 77%, 
+        transparent
+      ),
+      linear-gradient(
+        90deg, 
+        transparent 24%, 
+        var(--color) 25%, 
+        var(--color) 26%, 
+        transparent 27%, 
+        transparent 74%, 
+        var(--color) 75%, 
+        var(--color) 76%, 
+        transparent 77%, 
+        transparent
+      );
+    background-size: 55px 55px;
+  }
+  }
+  
+  
+  
+
+.user-select-none {
+  user-select: none; /* Standard syntax */
+  -webkit-user-select: none; /* Safari */
+  -moz-user-select: none; /* Firefox */
+  -ms-user-select: none; /* Internet Explorer/Edge */
+}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer utilities {
+  .bg-custom-pattern {
+    --s: 60px;
+    --c1: #ffffff;
+    --c2: #cceeff;
+    --_g: radial-gradient(
+      25% 25% at 25% 25%,
+      var(--c1) 99%,
+      rgba(0, 0, 0, 0) 101%
+    );
+    background: 
+      var(--_g) var(--s) var(--s) / calc(2 * var(--s)) calc(2 * var(--s)),
+      var(--_g) 0 0 / calc(2 * var(--s)) calc(2 * var(--s)),
+      radial-gradient(50% 50%, var(--c2) 98%, rgba(0, 0, 0, 0)) 0 0 / var(--s) var(--s),
+      repeating-conic-gradient(var(--c2) 0 50%, var(--c1) 0 100%) calc(0.5 * var(--s)) 0 / calc(2 * var(--s)) var(--s);
+  }
+  .bg-custom-login-pattern {
+    --s: 200px; /* control the size */
+    --c1: #1d1d1d;
+    --c2: #4e4f51;
+    --c3: #3c3c3c;
+
+    background: repeating-conic-gradient(
+          from 30deg,
+          #0000 0 120deg,
+          var(--c3) 0 180deg
+        )
+        calc(0.5 * var(--s)) calc(0.5 * var(--s) * 0.577),
+      repeating-conic-gradient(
+        from 30deg,
+        var(--c1) 0 60deg,
+        var(--c2) 0 120deg,
+        var(--c3) 0 180deg
+      );
+    background-size: var(--s) calc(var(--s) * 0.577);
+  }
+  .bg-profile{
+    --color: #E1E1E1;
+    background-color: #F3F3F3;
+    background-image: linear-gradient(
+        0deg, 
+        transparent 24%, 
+        var(--color) 25%, 
+        var(--color) 26%, 
+        transparent 27%, 
+        transparent 74%, 
+        var(--color) 75%, 
+        var(--color) 76%, 
+        transparent 77%, 
+        transparent
+      ),
+      linear-gradient(
+        90deg, 
+        transparent 24%, 
+        var(--color) 25%, 
+        var(--color) 26%, 
+        transparent 27%, 
+        transparent 74%, 
+        var(--color) 75%, 
+        var(--color) 76%, 
+        transparent 77%, 
+        transparent
+      );
+    background-size: 55px 55px;
+  }
+  }
+  
+  
+  
+
+.user-select-none {
+  user-select: none; /* Standard syntax */
+  -webkit-user-select: none; /* Safari */
+  -moz-user-select: none; /* Firefox */
+  -ms-user-select: none; /* Internet Explorer/Edge */
+}
+
+
+
+
+
+
