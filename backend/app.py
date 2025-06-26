@@ -9,6 +9,13 @@ from flask_cors import CORS
 from functools import wraps
 from PIL import Image
 import io
+from ultralytics import YOLO
+import torch
+
+
+# Load the YOLOv8 face model
+yolo_model = YOLO("./runs/detect/train11/weights/best.pt")  # Update path if needed
+
 
 
 app = Flask(__name__ )
@@ -137,16 +144,29 @@ def face_orientation():
 
     # Convert the image to grayscale
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    yolo_faces = yolo_model(frame)[0]
+    faces =[]
+    for box in yolo_faces.boxes:
+        if int(box.cls[0]) == 0: #class = 0 is for face
+            x1,y1,x2,y2 = box.xyxy[0].tolist()
+            x,y,w,h = int (x1), int(y1), int(x2 - x1), int(y2 - y1)
+            faces.append((x, y, w, h))
+            print("detected by yolo")
 
-    # Detect faces in the image
-    faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5)
+    # Detect faces using Haar Cascade if yolo fails.
+    if len(faces) == 0:
+        print("No face from YOLO — falling back to Haarcascade")
+        faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
 
     orientation_status = "No face Detected"
     if len(faces) > 0:
         for face_rect in faces:
             orientation_status = analyze_head_orientation(face_rect, frame.shape)
 
-    return jsonify({"status": orientation_status})
+    return jsonify({"status": orientation_status,
+                    "face_count":len(faces)})
 
 
 @app.route('/get-all-tests', methods=['GET'])
@@ -365,5 +385,5 @@ def decode_token(token):
 
 
 if __name__ == '__main__':
-    create_tables()  # Ensure the database and tables exist
+    create_tables() 
     app.run(debug=True)
