@@ -35,7 +35,7 @@ const Login_admin = () => {
       <div className="flex flex-col items-center justify-center min-h-screen  text-gray-200 ">
         <img className=" w-24 h-24 rounded-full m-8" alt="Logo" src={logo}>
         </img>
-        <h1 className="font-Zen font-medium text-end text-3xl mb-2 text-black  ">eProctor</h1>
+        <h1 className="font-Zen font-medium text-end text-3xl mb-2 text-black  ">ProctoringAI</h1>
 
         <div className="w-80 rounded-lg bg-gray-100 p-8">
           <p className="text-center text-xl font-bold font-Orbitron text-black">Admin Login</p>

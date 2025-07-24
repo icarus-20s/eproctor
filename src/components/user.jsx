@@ -4,10 +4,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import logo from '../assets/logoexam.jpg'
 import Ut2 from "./underline2"
 import Marquee from "./textloop"
+import puppet from '/pupet.jpg'; // Assuming you have a puppet image
+import { useTestContext } from './Context.jsx'; // Assuming you have a logout function in your context
 
 const User = () => {
   // Initialize the navigation hook
   const navigate = useNavigate();
+  const  {logout}  = useTestContext(); // Assuming you have a logout function in your context
 
   const startTest = () => {
     // Handle starting the test logic (optional)
@@ -20,16 +23,20 @@ const User = () => {
   const username = location.state?.username;
   useEffect(() => {
     if (!username) {
-      navigate("/login_user"); // Redirect to login page
+      navigate("/login_user"); 
     }
   }, [username, navigate]);
+  const handleLogout = () => {
+    logout(); // Call the logout function from context
+    navigate('/login_user'); // Redirect to login page after logout
+  };
   return (
     <>
       <div className="min-h-screen flex flex-col md:flex-row bg-slate-100">
         {/* Sidebar: Profile Section */}
             <img className=" w-16 h-16 rounded-full m-2" alt="Logo" src={logo}>
           </img>
-          <h1 className="font-Zen font-medium text-end text-2xl mt-6  ">eProctor</h1>
+          <h1 className="font-Zen font-medium text-end text-2xl mt-6  ">ProctoringAI</h1>
           <div className='flex-1 flex flex-col items-center justify-center max-w-72'>
         <aside className="w-[500px] h-full absolute left-0 b p-6 shadow-2xl flex flex-col justify-center items-center">
             
@@ -37,7 +44,7 @@ const User = () => {
           <div className="flex flex-col justify-center items-center mt-8 ">
             <img
               className="w-52 h-52 rounded-full object-cover mb-4 border-4 border-blue-500"
-              src="https://i.pinimg.com/originals/59/af/9c/59af9cd100daf9aa154cc753dd58316d.jpg"
+              src={puppet}
               alt="Profile"
             />
             <h2 className="text-3xl font-Lex font-bold text-gray-800">{username}</h2>
@@ -45,7 +52,9 @@ const User = () => {
           </div>
           <nav className="mt-8 space-y-4 w-full">
             
-            <button className="w-full px-4 py-3 bg-red-50 text-red-600 font-medium rounded-lg font-Orbitron hover:bg-red-100 transition duration-300">
+            <button className="w-full px-4 py-3 bg-red-50 text-red-600 font-medium rounded-lg font-Orbitron hover:bg-red-100 transition duration-300"
+            onClick={handleLogout}
+            >
               Log Out
             </button>
           </nav>

@@ -265,67 +265,66 @@ const McqTest = () => {
     }, []);
   const [message, setMessage] = useState('');
 
-  // Function to handle form submission
+ // Function to handle form submission
+const handleSubmitTest = async (e) => {
+  e.preventDefault();
 
-  const handleSubmitTest = async (e) => {
-    e.preventDefault();
-    let updatedAnswers = { ...answers };
+  try {
+    // Prepare updated answers by copying current answers
+    const updatedAnswers = { ...answers };
 
-    // Check if there is a selected option for the current question and update the answers
-    if (selectedOption !== null) {
-      const currentQuestion = questions[currentQuestionIndex]?.question;
-      updatedAnswers[currentQuestion] = questions[currentQuestionIndex]?.options[selectedOption];
-    }
-        try {
-            const response = await fetch('http://localhost:5000/submit-test', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    username: username,
-                    test_id: testCode,
-                    answers: updatedAnswers,
-                    session_login: sessionLogin,
-                }),
-            });
-
-            if (response.ok) {
-                setMessage('Test submitted successfully.');
-            } else {
-                const errorData = await response.json();
-                setMessage(`Error: ${errorData.message}`);
-            }
-        } catch (error) {
-            setMessage('Failed to submit the test.');
-            console.error('Error submitting test:', error);
-        }
-      
-    console.log(updatedAnswers);
-    // Add a slight delay to ensure the state is updated before submission
-    setTimeout(() => {
-      console.log('Submitted Answers:', updatedAnswers);
-      
-      // Exit fullscreen and navigate away from the test page
-      exitFullscreen();
-      navigate('/user');
-    }, 0); // Delay can be 0 since setState is asynchronous
-  };
-
-
-  const exitFullscreen = () => {
-    if (document.exitFullscreen) {
-      document.exitFullscreen();
-    } else if (document.mozCancelFullScreen) {
-      document.mozCancelFullScreen();
-    } else if (document.webkitExitFullscreen) {
-      document.webkitExitFullscreen();
-    } else if (document.msExitFullscreen) {
-      document.msExitFullscreen();
+    // If there's a selected option for the current question, update answers
+    if (selectedOption !== null && questions[currentQuestionIndex]) {
+      const currentQuestion = questions[currentQuestionIndex].question;
+      updatedAnswers[currentQuestion] = questions[currentQuestionIndex].options[selectedOption];
     }
 
-    document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  };
+    // Submit answers to backend
+    const response = await fetch('http://localhost:5000/submit-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        test_id: testCode,
+        answers: updatedAnswers,
+        session_login: sessionLogin,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to submit the test.');
+    }
+
+    setMessage('Test submitted successfully.');
+    console.log('Submitted Answers:', updatedAnswers);
+
+    // Exit fullscreen and navigate away after submission
+    exitFullscreen();
+    
+    navigate('/user');
+
+  } catch (error) {
+    setMessage(`Error submitting test: ${error.message}`);
+    console.error('Error submitting test:', error);
+  }
+};
+
+// Function to exit fullscreen mode gracefully
+const exitFullscreen = () => {
+  if (document.exitFullscreen) {
+    document.exitFullscreen();
+  } else if (document.mozCancelFullScreen) { // Firefox
+    document.mozCancelFullScreen();
+  } else if (document.webkitExitFullscreen) { // Chrome, Safari and Opera
+    document.webkitExitFullscreen();
+  } else if (document.msExitFullscreen) { // IE/Edge
+    document.msExitFullscreen();
+  }
+
+  document.removeEventListener('fullscreenchange', handleFullscreenChange);
+};
+
 
   const handleTestCodeChange = (e) => {
     setTestCode(e.target.value);

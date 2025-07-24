@@ -12,7 +12,7 @@ const Docs = () => {
     <div className="flex justify-start items-center">
    <img className=" w-16 h-16 rounded-full m-4" alt="Logo" src={logo}>
           </img>
-          <h1 className=" font-medium text-end text-2xl font-Zen  ">eProctor</h1>
+          <h1 className=" font-medium text-end text-2xl font-Zen  ">ProctoringAI</h1>
     </div>
     <div className="flex justify-end items-center">
     <button class="relative bg-transparent text-black w-24 h-12 border-2 border-blue-500 rounded-[11px] m-2 transition-all duration-600 ease-in-out hover:bg-blue-600 hover:text-white  cursor-pointer"><a href="/login_user">
@@ -37,7 +37,7 @@ const Docs = () => {
    <img className=" w-24 h-24 rounded-full m-4" alt="Logo" src={logo}>
    </img>
     <h1 className="font-Zen text-7xl  hover:scale-125 mb-8 transition transition-linear duration-200 ">
-    Welcome to eProctor
+    Welcome to ProctoringAI
     </h1>
    <Underline/>
     <ul className="list-disc list-inside space-y-2 font-mono m-8 text-xl" >

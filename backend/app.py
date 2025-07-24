@@ -1,6 +1,7 @@
 import sqlite3
 import bcrypt
 import os
+from datetime import datetime
 import json
 import cv2
 import numpy as np
@@ -10,6 +11,7 @@ from functools import wraps
 from PIL import Image
 import io
 from ultralytics import YOLO
+from flask import send_from_directory
 import torch
 
 
@@ -73,9 +75,23 @@ def create_tables():
             FOREIGN KEY (test_id) REFERENCES tests (id)
         )
     ''')
+
+    # Suspicious activity logs
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS suspicious_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            test_id INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            frame_path TEXT,
+            FOREIGN KEY (test_id) REFERENCES tests (id)
+        )
+    ''')
     
     conn.commit()
     conn.close()
+
 
 # Role-based access control decorator
 def role_required(role):
@@ -111,7 +127,7 @@ def login():
         if bcrypt.checkpw(salted_password, user['password']):
             # Generate a token with the user's info, including their role
             token = generate_token(username, user['role'])  # Implement your token generation logic here
-            return jsonify({"message": "Login successful!", "redirect": "/user", "token": token}), 200
+            return jsonify({"message": "Login successful!","token": token}), 200
 
     return jsonify({"message": "Invalid username or password."}), 401
 
@@ -132,11 +148,18 @@ def analyze_head_orientation(face_rect, image_shape):
     else:
         return "Facing Camera"
 
-# Route for receiving video frames and analyzing face orientation
+
+face_disappearance_tracker = {}
 @app.route('/face-orientation', methods=['POST'])
 def face_orientation():
     if 'frame' not in request.files:
         return jsonify({"error": "No frame provided"}), 400
+    
+    username = request.form.get('username')
+    test_id = int(request.form.get('test_id'))
+    
+    # Create unique key for this user-test combination
+    user_test_key = f"{username}_{test_id}"
 
     # Get the frame (image) from the request
     frame_file = request.files['frame']
@@ -145,30 +168,61 @@ def face_orientation():
     # Convert the image to grayscale
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     
+    # YOLO face detection
     yolo_faces = yolo_model(frame)[0]
-    faces =[]
+    faces = []
     for box in yolo_faces.boxes:
-        if int(box.cls[0]) == 0: #class = 0 is for face
-            x1,y1,x2,y2 = box.xyxy[0].tolist()
-            x,y,w,h = int (x1), int(y1), int(x2 - x1), int(y2 - y1)
+        if int(box.cls[0]) == 0:  # class = 0 is for face
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
             faces.append((x, y, w, h))
             print("detected by yolo")
 
-    # Detect faces using Haar Cascade if yolo fails.
+    # Detect faces using Haar Cascade if yolo fails
     if len(faces) == 0:
         print("No face from YOLO — falling back to Haarcascade")
         faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
-
-    orientation_status = "No face Detected"
-    if len(faces) > 0:
-        for face_rect in faces:
+    current_time = datetime.now()
+    
+    # Handle face detection results
+    if len(faces) == 0:
+        # No face detected
+        if user_test_key not in face_disappearance_tracker:
+            # First time no face detected - start tracking
+            face_disappearance_tracker[user_test_key] = current_time
+        else:
+            # Check if 3 seconds have passed since face disappeared
+            time_diff = (current_time - face_disappearance_tracker[user_test_key]).total_seconds()
+            if time_diff >= 3:
+                # Log suspicious event - face missing for 3+ seconds
+                log_suspicious_event(username, test_id, "No Face Detected", frame)
+                # Reset tracker to avoid continuous logging
+                face_disappearance_tracker[user_test_key] = current_time
+        
+        orientation_status = "No Face Detected"
+    else:
+        # Face(s) detected - reset tracker
+        if user_test_key in face_disappearance_tracker:
+            del face_disappearance_tracker[user_test_key]
+        
+        # Check for multiple faces
+        if len(faces) > 1:
+            log_suspicious_event(username, test_id, "Multiple Faces Detected", frame)
+            orientation_status = "Multiple Faces Detected"
+        else:
+            # Single face detected - check orientation
+            face_rect = faces[0]
             orientation_status = analyze_head_orientation(face_rect, frame.shape)
+            
+            if orientation_status == "Face Turned Away":
+                log_suspicious_event(username, test_id, "Face Turned Away", frame)
 
-    return jsonify({"status": orientation_status,
-                    "face_count":len(faces)})
-
-
+    return jsonify({
+        "status": orientation_status,
+        "face_count": len(faces),
+        "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S')
+    })
 @app.route('/get-all-tests', methods=['GET'])
 def get_all_tests():
     conn = get_db_connection()
@@ -382,6 +436,97 @@ def decode_token(token):
     # Implement token decoding logic (e.g., JWT)
     username, role = token.split('-token')
     return {'username': username, 'role': 'admin' if username == 'admin' else 'user'}
+
+
+import uuid
+@app.route('/logs/<path:path>')
+def serve_log_image(path):
+    return send_from_directory('logs', path)
+
+
+def log_suspicious_event(username, test_id, event_type, frame_np_array):
+    if not username or not isinstance(test_id, int) or not event_type or frame_np_array is None:
+        print(f"[ERROR] Invalid log input: username={username}, test_id={test_id}, event_type={event_type}")
+        return
+
+    try:
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+        unique_id = uuid.uuid4().hex[:8]
+        
+        # Define structured path: logs/username/test_<id>/eventname_timestamp_uid.jpg
+        base_log_dir = 'logs'
+        event_name = event_type.replace(" ", "_").lower()
+        folder_path = os.path.join(base_log_dir, username, f"test_{test_id}")
+        os.makedirs(folder_path, exist_ok=True)
+
+        filename = f"{event_name}_{timestamp}_{unique_id}.jpg"
+        full_path = os.path.join(folder_path, filename)
+
+        # Save image
+        frame_image = Image.fromarray(frame_np_array)
+        frame_image.save(full_path)
+
+        # Relative path for DB
+        relative_path = os.path.relpath(full_path, base_log_dir)
+
+        # Log to DB
+        conn = get_db_connection()
+        conn.execute('''
+            INSERT INTO suspicious_events (username, test_id, timestamp, event_type, frame_path)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (username, test_id, timestamp, event_type, relative_path))
+        conn.commit()
+        conn.close()
+
+        print(f"[INFO] Logged: {event_type} | User: {username} | Test: {test_id} | Path: {relative_path}")
+
+    except Exception as e:
+        print(f"[ERROR] Logging failed: {e}")
+
+
+@app.route('/review-logs')
+def review_logs():
+    username = request.args.get('username')
+    test_id = request.args.get('test_id')
+
+    query = 'SELECT * FROM suspicious_events WHERE 1=1'
+    params = []
+
+    if username:
+        query += ' AND username = ?'
+        params.append(username)
+
+    if test_id:
+        query += ' AND test_id = ?'
+        params.append(int(test_id))
+
+    query += ' ORDER BY timestamp DESC'
+
+    conn = get_db_connection()
+    logs = conn.execute(query, params).fetchall()
+    conn.close()
+
+    html = '<h2>Suspicious Event Logs</h2><ul>'
+    for log in logs:
+        html += f"<li><b>{log['timestamp']}</b> | {log['username']} | Test {log['test_id']} | {log['event_type']}<br>"
+        html += f"<img src='/logs/{log['frame_path']}' width='320'/>"
+        html += '</li>'
+    html += '</ul>'
+    return html
+
+
+
+
+@app.route('/get-logs-json')
+def get_logs_json():
+    conn = get_db_connection()
+    cursor = conn.execute('SELECT * FROM suspicious_events ORDER BY timestamp DESC')
+    rows = cursor.fetchall()
+    conn.close()
+
+    logs = [dict(row) for row in rows]
+    return jsonify(logs)
+
 
 
 if __name__ == '__main__':

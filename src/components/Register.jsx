@@ -41,7 +41,7 @@ function Register() {
     <div className = "flex flex-col justify-center items-center min-h-screen bg-white text-gray-200 ">
        <img className=" w-24 h-24 rounded-full m-8" alt="Logo" src={logo}>
         </img>
-        <h1 className="font-Zen font-medium text-end text-3xl mb-2 text-black  ">eProctor</h1>
+        <h1 className="font-Zen font-medium text-end text-3xl mb-2 text-black  ">ProctoringAI</h1>
       <div className = "flex flex-col justify-center items-center  bg-gray-100 p-8 rounded-lg">
 
       

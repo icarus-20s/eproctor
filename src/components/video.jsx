@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 
 function FaceOrientationChecker() {
-  const [status, setStatus] = useState('Unknown');
+  const [status, setStatus] = useState({
+    orientation: 'unknown',
+    faceCount: 0
+  });
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -21,19 +25,26 @@ function FaceOrientationChecker() {
       const canvas = canvasRef.current;
       const video = videoRef.current;
 
-      // Draw video frame on the canvas
+      if (!canvas || !video) return;
+
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Convert canvas to Blob and send to Flask server
       canvas.toBlob(blob => {
         const formData = new FormData();
         formData.append('frame', blob, 'frame.jpg');
+        formData.append('username', 'ayush123'); // 👈 hardcoded
+        formData.append('test_id', '5');         // 👈 hardcoded
+
         axios.post('http://localhost:5000/face-orientation', formData)
           .then(response => {
-            setStatus(response.data.status);
+            setStatus({
+              orientation: response.data.status,
+              faceCount: response.data.face_count
+            });
           })
           .catch(error => {
             console.error('Error sending frame:', error);
@@ -41,28 +52,55 @@ function FaceOrientationChecker() {
       }, 'image/jpeg');
     };
 
-    // Send a frame to the server every second
     const interval = setInterval(sendFrameToServer, 1000);
 
-    return () => {
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className='rounded-md '>
-      <h1>Face Orientation Status</h1>
-     <div  className='h-96 rounded-md '>
-      <video ref={videoRef} className='rounded-md'></video>
+    <div className='rounded-md p-4'>
+      <h1 className='text-2xl font-bold mb-2'>Face Orientation Status</h1>
+      
+      <div className='h-96 rounded-md overflow-hidden'>
+        <video ref={videoRef} className='w-full h-full object-cover rounded-md' />
       </div>
-      <div className='bg-black h-24 w-full rounded-md'>
 
-      </div>
+      <div className='bg-black h-24 w-full mt-2 rounded-md' />
+
       <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
-      <p className='text-red-600 text-2xl ml-24 mt-3'>{status}</p>
-      {status === 'Face Turned Away' && <p style={{ color: 'red' }} className='text-3xl mx-auto ml-5  mt-2 font-Orbitron hidden'>Please face the screen!</p>}
+
+      <div className='mt-4'>
+        <p className='text-red-600 text-2xl ml-4'>Status: {status.orientation}</p>
+
+        {status.faceCount === 0 && (
+          <p className='text-3xl text-yellow-400 font-bold mt-4 ml-4'>
+            No face detected — Please position yourself in front of the camera.
+          </p>
+        )}
+
+        {status.faceCount > 1 && (
+          <p className='text-3xl text-red-600 font-bold mt-4 ml-4'>
+            Multiple faces detected — Only one candidate is allowed on screen.
+          </p>
+        )}
+
+        {status.orientation === 'Face Turned Away' && status.faceCount === 1 && (
+          <p className='text-3xl text-red-500 font-bold mt-4 ml-4'>
+            Please look directly at the screen.
+          </p>
+        )}
+
+        {status.orientation === 'Facing Camera' && status.faceCount === 1 && (
+          <p className='text-2xl text-green-600 mt-4 ml-4'>
+            Face aligned properly. Monitoring active.
+          </p>
+        )}
+
+        <p className='text-green-600 text-xl ml-4 mt-2'>
+          Faces detected: {status.faceCount}
+        </p>
+      </div>
     </div>
-    
   );
 }
 

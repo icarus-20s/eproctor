@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import logo from "../assets/logoexam.jpg"
 import Ut2 from "./underline2"
 import Marquee from "./textloop"
+import { useTestContext } from './Context';
 
 
 const Admin = () => {
@@ -13,6 +14,7 @@ const Admin = () => {
   const location = useLocation();
   const username = location.state?.username;
   const navigate = useNavigate();
+  const {logout} = useTestContext();
   console.log(username);
   useEffect(() => {
     if (!username) {
@@ -38,14 +40,18 @@ const Admin = () => {
     closeModal();
   };
   
-  
+  const handleLogout = () => {
+    logout();
+    navigate('/login_admin');
+
+  }
 
   return (
     <>
       <div className="min-h-screen flex flex-col md:flex-row bg-slate-100">
           <img className=" w-16 h-16 rounded-full m-2" alt="Logo" src={logo}>
           </img>
-          <h1 className="font-Zen font-medium text-end mt-6 text-2xl  ">eProctor</h1>
+          <h1 className="font-Zen font-medium text-end mt-6 text-2xl  ">ProctoringAI</h1>
           
         <div className='flex-1 flex flex-col items-center justify-center max-w-72'>
         {/* Sidebar: Profile Section */}
@@ -61,7 +67,8 @@ const Admin = () => {
           </div>
           <nav className="mt-8 space-y-4 w-full">
             
-            <button className="w-full px-4 py-3 bg-red-100 font-Orbitron text-red-600 font-medium rounded-lg hover:bg-red-200 transition duration-300">
+            <button className="w-full px-4 py-3 bg-red-100 font-Orbitron text-red-600 font-medium rounded-lg hover:bg-red-200 transition duration-300"
+            onClick={handleLogout}>
               Log Out
             </button>
           </nav>
