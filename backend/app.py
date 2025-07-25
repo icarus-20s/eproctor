@@ -154,7 +154,6 @@ face_disappearance_tracker = {}
 def face_orientation():
     if 'frame' not in request.files:
         return jsonify({"error": "No frame provided"}), 400
-    
     username = request.form.get('username')
     test_id = int(request.form.get('test_id'))
     
@@ -163,6 +162,7 @@ def face_orientation():
 
     # Get the frame (image) from the request
     frame_file = request.files['frame']
+    print(frame_file.filename)  # Debugging line to check the filename
     frame = np.array(Image.open(io.BytesIO(frame_file.read())))
 
     # Convert the image to grayscale

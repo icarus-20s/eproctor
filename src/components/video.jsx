@@ -1,31 +1,62 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 
-function FaceOrientationChecker() {
+const test_code = localStorage.getItem('testCode');
+const username = localStorage.getItem('username');
+
+function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
   const [status, setStatus] = useState({
     orientation: 'unknown',
-    faceCount: 0
+    faceCount: 0,
+    timestamp: ''
   });
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamRef = useRef(null);
 
+  // Start webcam stream
   useEffect(() => {
-    // Access webcam
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      })
-      .catch(error => {
-        console.error('Error accessing webcam:', error);
-      });
+    const startWebcam = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } catch (error) {
+        console.error('Failed to access webcam:', error);
+      }
+    };
 
-    const sendFrameToServer = () => {
+    startWebcam();
+
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
+  // Send frame periodically
+  useEffect(() => {
+    if (!isActive || stopSignal) return;
+
+    const intervalId = setInterval(() => {
+      sendFrameToServer();
+    }, 3000); // Every 3 seconds
+
+    return () => clearInterval(intervalId);
+  }, [isActive, stopSignal, username, test_code]);
+
+  const sendFrameToServer = async () => {
+    if (!streamRef.current || !videoRef.current || !canvasRef.current) return;
+
+    try {
       const canvas = canvasRef.current;
       const video = videoRef.current;
 
-      if (!canvas || !video) return;
+      if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -33,74 +64,74 @@ function FaceOrientationChecker() {
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      canvas.toBlob(blob => {
+      canvas.toBlob(async (blob) => {
+        if (!blob || stopSignal) return;
+
         const formData = new FormData();
         formData.append('frame', blob, 'frame.jpg');
-        formData.append('username', 'ayush123'); // 👈 hardcoded
-        formData.append('test_id', '5');         // 👈 hardcoded
+        formData.append('username', username);
+        formData.append('test_id', test_code);
 
-        axios.post('http://localhost:5000/face-orientation', formData)
-          .then(response => {
+        // Debugging the payload
+        for (let pair of formData.entries()) {
+          console.log(`${pair[0]}:`, pair[1]);
+        }
+
+        try {
+          const response = await axios.post('http://localhost:5000/face-orientation', formData, {
+            timeout: 5000,
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+
+          if (response.data && !stopSignal) {
             setStatus({
               orientation: response.data.status,
-              faceCount: response.data.face_count
+              faceCount: response.data.face_count,
+              timestamp: response.data.timestamp
             });
-          })
-          .catch(error => {
-            console.error('Error sending frame:', error);
-          });
-      }, 'image/jpeg');
-    };
-
-    const interval = setInterval(sendFrameToServer, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
+          }
+        } catch (error) {
+          if (error.response) {
+            console.error('Backend error:', error.response.status, error.response.data);
+          } else {
+            console.error('Network or unexpected error:', error.message);
+          }
+        }
+      }, 'image/jpeg', 0.8);
+    } catch (error) {
+      console.error('Error processing frame:', error);
+    }
+  };
 
   return (
-    <div className='rounded-md p-4'>
-      <h1 className='text-2xl font-bold mb-2'>Face Orientation Status</h1>
-      
-      <div className='h-96 rounded-md overflow-hidden'>
-        <video ref={videoRef} className='w-full h-full object-cover rounded-md' />
-      </div>
+   <div className="p-6 max-w-xl mx-auto bg-white shadow-lg rounded-xl space-y-6">
+  <h2 className="text-2xl font-semibold text-center text-gray-800">Face Orientation Checker</h2>
 
-      <div className='bg-black h-24 w-full mt-2 rounded-md' />
+  <div className="flex justify-center">
+    <video
+      ref={videoRef}
+      autoPlay
+      muted
+      width="400"
+      height="300"
+      className="rounded-lg border border-gray-300 shadow-md"
+    />
+    <canvas ref={canvasRef} className="hidden" />
+  </div>
 
-      <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
+  <div className="bg-gray-100 p-4 rounded-lg">
+    <p className="text-lg text-gray-700">
+      <span className="font-bold text-gray-900">Face Count:</span> {status.faceCount}
+    </p>
+    <p className="text-lg text-gray-700">
+      <span className="font-bold text-gray-900">Orientation:</span> {status.orientation}
+    </p>
+    <p className="text-lg text-gray-700">
+      <span className="font-bold text-gray-900">Timestamp:</span> {status.timestamp}
+    </p>
+  </div>
+</div>
 
-      <div className='mt-4'>
-        <p className='text-red-600 text-2xl ml-4'>Status: {status.orientation}</p>
-
-        {status.faceCount === 0 && (
-          <p className='text-3xl text-yellow-400 font-bold mt-4 ml-4'>
-            No face detected — Please position yourself in front of the camera.
-          </p>
-        )}
-
-        {status.faceCount > 1 && (
-          <p className='text-3xl text-red-600 font-bold mt-4 ml-4'>
-            Multiple faces detected — Only one candidate is allowed on screen.
-          </p>
-        )}
-
-        {status.orientation === 'Face Turned Away' && status.faceCount === 1 && (
-          <p className='text-3xl text-red-500 font-bold mt-4 ml-4'>
-            Please look directly at the screen.
-          </p>
-        )}
-
-        {status.orientation === 'Facing Camera' && status.faceCount === 1 && (
-          <p className='text-2xl text-green-600 mt-4 ml-4'>
-            Face aligned properly. Monitoring active.
-          </p>
-        )}
-
-        <p className='text-green-600 text-xl ml-4 mt-2'>
-          Faces detected: {status.faceCount}
-        </p>
-      </div>
-    </div>
   );
 }
 
