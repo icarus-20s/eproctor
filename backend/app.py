@@ -13,11 +13,25 @@ import io
 from ultralytics import YOLO
 from flask import send_from_directory
 import torch
+import dlib
 
 
+
+# Load face detector and predictor
+detector = dlib.get_frontal_face_detector()
+predictor = dlib.shape_predictor("./models/shape_predictor_68_face_landmarks.dat")
 # Load the YOLOv8 face model
-yolo_model = YOLO("./runs/detect/train11/weights/best.pt")  # Update path if needed
+yolo_model = YOLO("./models/detect/train11/weights/best.pt")  # Update path if needed
 
+# 3D model points
+model_points = np.array([
+    (0.0, 0.0, 0.0),             # Nose tip
+    (0.0, -330.0, -65.0),        # Chin
+    (-225.0, 170.0, -135.0),     # Left eye left corner
+    (225.0, 170.0, -135.0),      # Right eye right corner
+    (-150.0, -150.0, -125.0),    # Left mouth corner
+    (150.0, -150.0, -125.0)      # Right mouth corner
+])
 
 
 app = Flask(__name__ )
@@ -127,6 +141,7 @@ def login():
         if bcrypt.checkpw(salted_password, user['password']):
             # Generate a token with the user's info, including their role
             token = generate_token(username, user['role'])  # Implement your token generation logic here
+            print(token)
             return jsonify({"message": "Login successful!","token": token}), 200
 
     return jsonify({"message": "Invalid username or password."}), 401
@@ -156,7 +171,6 @@ def face_orientation():
         return jsonify({"error": "No frame provided"}), 400
     username = request.form.get('username')
     test_id = int(request.form.get('test_id'))
-    
     # Create unique key for this user-test combination
     user_test_key = f"{username}_{test_id}"
 
@@ -527,6 +541,180 @@ def get_logs_json():
     logs = [dict(row) for row in rows]
     return jsonify(logs)
 
+
+@app.route('/delete-test', methods=['DELETE'])
+def delete_test():
+    print("[DEBUG] Delete test route hit!")
+    data = request.get_json()
+    test_code = data.get('testCode')
+
+    if not test_code:
+        return jsonify({"message": "Missing test code."}), 400
+
+    conn = get_db_connection()
+
+    test = conn.execute('SELECT id FROM tests WHERE test_code = ?', (test_code,)).fetchone()
+
+    if not test:
+        conn.close()
+        return jsonify({"message": "Test not found."}), 404
+
+    test_id = test['id']
+
+    conn.execute('DELETE FROM user_test_sessions WHERE test_id = ?', (test_id,))
+
+    conn.execute('DELETE FROM suspicious_events WHERE test_id = ?', (test_id,))
+
+    conn.execute('DELETE FROM tests WHERE id = ?', (test_id,))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({"message": "Test deleted successfully."}), 200
+
+
+
+app.route('/delete-user', methods=['DELETE'])
+def delete_user():
+    data = request.get_json()
+    username = data.get('username')
+
+    if not username:
+        return jsonify({"message": "Missing username."}), 400
+
+    conn = get_db_connection()
+    # Check if user exists
+    user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
+    if not user:
+        conn.close()
+        return jsonify({"message": "User not found."}), 404
+
+    conn.execute('DELETE FROM user_test_sessions WHERE username = ?', (username,))
+    conn.execute('DELETE FROM suspicious_events WHERE username = ?', (username,))
+
+    conn.execute('DELETE FROM users WHERE username = ?', (username,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "User deleted successfully."}), 200
+
+@app.route('/detect-eye', methods=['POST'])
+def detect_eye():
+    if 'frame' not in request.files:
+        return jsonify({"error": "No frame provided"}), 400
+
+    username = request.form.get('username')
+    test_id = int(request.form.get('test_id'))
+    user_test_key = f"{username}_{test_id}"
+
+    # Load frame from request
+    frame_file = request.files['frame']
+    frame = np.array(Image.open(io.BytesIO(frame_file.read())))
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # YOLO face detection
+    yolo_faces = yolo_model(frame)[0]
+    faces = []
+    for box in yolo_faces.boxes:
+        if int(box.cls[0]) == 0:
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
+            faces.append(dlib.rectangle(x, y, x + w, y + h))
+
+    # Fallback to Haar
+    if len(faces) == 0:
+        haar_faces = face_cascade.detectMultiScale(gray, 1.1, 5)
+        for (x, y, w, h) in haar_faces:
+            faces.append(dlib.rectangle(x, y, x + w, y + h))
+
+    current_time = datetime.now()
+
+    if len(faces) == 0:
+        if user_test_key not in face_disappearance_tracker:
+            face_disappearance_tracker[user_test_key] = current_time
+        else:
+            time_diff = (current_time - face_disappearance_tracker[user_test_key]).total_seconds()
+            if time_diff >= 3:
+                log_suspicious_event(username, test_id, "No Face Detected", frame)
+                face_disappearance_tracker[user_test_key] = current_time
+
+        return jsonify({
+            "status": "No Face Detected",
+            "face_count": 0,
+            "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    # Reset disappearance tracker
+    if user_test_key in face_disappearance_tracker:
+        del face_disappearance_tracker[user_test_key]
+
+    if len(faces) > 1:
+        log_suspicious_event(username, test_id, "Multiple Faces Detected", frame)
+        return jsonify({
+            "status": "Multiple Faces Detected",
+            "face_count": len(faces),
+            "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+    # Head pose estimation
+    face = faces[0]
+    landmarks = predictor(gray, face)
+
+    image_points = np.array([
+        (landmarks.part(30).x, landmarks.part(30).y),  # Nose tip
+        (landmarks.part(8).x, landmarks.part(8).y),    # Chin
+        (landmarks.part(36).x, landmarks.part(36).y),  # Left eye
+        (landmarks.part(45).x, landmarks.part(45).y),  # Right eye
+        (landmarks.part(48).x, landmarks.part(48).y),  # Left mouth
+        (landmarks.part(54).x, landmarks.part(54).y)   # Right mouth
+    ], dtype="double")
+
+    size = frame.shape
+    focal_length = size[1]
+    center = (size[1] / 2, size[0] / 2)
+    camera_matrix = np.array([
+        [focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]
+    ], dtype="double")
+    dist_coeffs = np.zeros((4, 1))
+
+    success, rotation_vector, translation_vector = cv2.solvePnP(
+        model_points, image_points, camera_matrix, dist_coeffs
+    )
+
+    (nose_end_point2D, _) = cv2.projectPoints(
+        np.array([(0.0, 0.0, 1000.0)]),
+        rotation_vector, translation_vector, camera_matrix, dist_coeffs
+    )
+
+    nose_tip = image_points[0]
+    nose_proj = nose_end_point2D[0][0]
+    dx = nose_proj[0] - nose_tip[0]
+    dy = nose_proj[1] - nose_tip[1]
+
+    if dx > 50:
+        head_direction = "Looking Right"
+    elif dx < -50:
+        head_direction = "Looking Left"
+    elif dy > 50:
+        head_direction = "Looking Down"
+    else:
+        head_direction = "Looking Center"
+
+    if head_direction != "Looking Center":
+        log_suspicious_event(username, test_id, f"{head_direction} (Head Pose)", frame)
+
+    return jsonify({
+        "status": head_direction,
+        "nose_tip": nose_tip.tolist(),
+        "rotation_vector": rotation_vector.ravel().tolist(),
+        "eye_positions": {
+            "left_eye": [landmarks.part(36).x, landmarks.part(36).y],
+            "right_eye": [landmarks.part(45).x, landmarks.part(45).y]
+        },
+        "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "face_count": 1
+    })
 
 
 if __name__ == '__main__':
