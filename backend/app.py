@@ -42,8 +42,10 @@ print(cv2.__version__)
 HAAR_CASCADE_PATH = 'haarcascade_frontalface_default.xml'  # Update this path
 face_cascade = cv2.CascadeClassifier(HAAR_CASCADE_PATH)
 
-# Define threshold for head turn detection
-TURN_THRESHOLD = 40  # Change this based on your requirements
+# Thresholds and constants
+TURN_THRESHOLD = 50  # pixels for face turn detection
+EAR_THRESHOLD = 0.23  # eye aspect ratio threshold for blink
+NO_FACE_TIMEOUT = 3  # seconds to consider face disappeared
 
 # Function to create a connection to the database
 def get_db_connection():
@@ -146,6 +148,8 @@ def login():
 
     return jsonify({"message": "Invalid username or password."}), 401
 
+
+
 def analyze_head_orientation(face_rect, image_shape):
     # Get the face rectangle
     x, y, w, h = face_rect
@@ -237,6 +241,9 @@ def face_orientation():
         "face_count": len(faces),
         "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S')
     })
+
+
+
 @app.route('/get-all-tests', methods=['GET'])
 def get_all_tests():
     conn = get_db_connection()
@@ -287,19 +294,25 @@ def end_test():
 def submit_test():
     data = request.get_json()
     username = data.get('username')
-    test_id = data.get('test_id')
+    test_code = data.get('test_id')  # the frontend sends test_code here as test_id
     answers = data.get('answers')
     ip_address = request.remote_addr
     session_login = data.get('session_login')
 
     conn = get_db_connection()
-    
-    # Insert data into the user_test_sessions table
+    # Convert test_code to test_id (numeric)
+    test = conn.execute('SELECT id FROM tests WHERE test_code = ?', (test_code,)).fetchone()
+    if not test:
+        conn.close()
+        return jsonify({"error": "Test not found"}), 404
+
+    test_id = test['id']
+
     conn.execute('''
         INSERT INTO user_test_sessions (username, test_id, answers, ip_address, session_login)
         VALUES (?, ?, ?, ?, ?)
     ''', (username, test_id, json.dumps(answers), ip_address, session_login))
-    
+
     conn.commit()
     conn.close()
     
@@ -470,9 +483,8 @@ def log_suspicious_event(username, test_id, event_type, frame_np_array):
         # Define structured path: logs/username/test_<id>/eventname_timestamp_uid.jpg
         base_log_dir = 'logs'
         event_name = event_type.replace(" ", "_").lower()
-        folder_path = os.path.join(base_log_dir, username, f"test_{test_id}")
+        folder_path = os.path.join(base_log_dir, f"test_{test_id}", username)
         os.makedirs(folder_path, exist_ok=True)
-
         filename = f"{event_name}_{timestamp}_{unique_id}.jpg"
         full_path = os.path.join(folder_path, filename)
 
@@ -528,19 +540,37 @@ def review_logs():
     html += '</ul>'
     return html
 
-
-
-
 @app.route('/get-logs-json')
 def get_logs_json():
+    username = request.args.get('username')
+    test_id = request.args.get('test_id')
+
+    query = 'SELECT * FROM suspicious_events WHERE 1=1'
+    params = []
+
+    if username:
+        query += ' AND username = ?'
+        params.append(username)
+
+    if test_id:
+        query += ' AND test_id = ?'
+        params.append(int(test_id))
+
+    query += ' ORDER BY timestamp DESC'
+
     conn = get_db_connection()
-    cursor = conn.execute('SELECT * FROM suspicious_events ORDER BY timestamp DESC')
+    cursor = conn.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
 
     logs = [dict(row) for row in rows]
     return jsonify(logs)
 
+@app.route('/logs/<path:filename>')
+def get_log_image(filename):
+    logs_folder = os.path.join(app.root_path, 'logs')
+    print(f"Serving file from: {logs_folder}, file requested: {filename}")
+    return send_from_directory(logs_folder, filename)
 
 @app.route('/delete-test', methods=['DELETE'])
 def delete_test():
@@ -573,29 +603,47 @@ def delete_test():
     return jsonify({"message": "Test deleted successfully."}), 200
 
 
-
-app.route('/delete-user', methods=['DELETE'])
-def delete_user():
+@app.route('/delete-user-from-test', methods=['DELETE'])
+def delete_user_from_test():
     data = request.get_json()
     username = data.get('username')
+    test_code = data.get('testCode')
+    print(test_code ,username)
 
-    if not username:
-        return jsonify({"message": "Missing username."}), 400
+    if not username or not test_code:
+        return jsonify({"message": "Missing username or test code."}), 400
+
+    try:
+        test_code = int(test_code)
+    except ValueError:
+        return jsonify({"message": "Invalid test code format."}), 400
 
     conn = get_db_connection()
+
+    # Get test_id from test_code
+    test = conn.execute('SELECT id FROM tests WHERE test_code = ?', (test_code,)).fetchone()
+    if not test:
+        conn.close()
+        return jsonify({"message": "Test not found."}), 404
+
+    test_id = test['id']
+
     # Check if user exists
     user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
     if not user:
         conn.close()
         return jsonify({"message": "User not found."}), 404
 
-    conn.execute('DELETE FROM user_test_sessions WHERE username = ?', (username,))
-    conn.execute('DELETE FROM suspicious_events WHERE username = ?', (username,))
+    # Delete user sessions only for that test
+    conn.execute('DELETE FROM user_test_sessions WHERE username = ? AND test_id = ?', (username, test_id))
 
-    conn.execute('DELETE FROM users WHERE username = ?', (username,))
+    # Delete suspicious events only for that test
+    conn.execute('DELETE FROM suspicious_events WHERE username = ? AND test_id = ?', (username, test_id))
+
     conn.commit()
     conn.close()
-    return jsonify({"message": "User deleted successfully."}), 200
+
+    return jsonify({"message": f"User {username} removed from test {test_code}."}), 200
 
 @app.route('/detect-eye', methods=['POST'])
 def detect_eye():
@@ -715,6 +763,37 @@ def detect_eye():
         "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S'),
         "face_count": 1
     })
+
+@app.route('/test/<test_code>/users', methods=['GET'])
+def get_users_by_test_code(test_code):
+    conn = get_db_connection()
+
+    test = conn.execute('SELECT id FROM tests WHERE test_code = ?', (test_code,)).fetchone()
+    if not test:
+        conn.close()
+        return jsonify({"error": "Test not found."}), 404
+
+    test_id = test['id']
+
+    users = conn.execute('''
+        SELECT DISTINCT username
+        FROM user_test_sessions
+        WHERE test_id = ?
+    ''', (test_id,)).fetchall()
+
+    conn.close()
+
+    user_list = [u['username'] for u in users]
+    result ={
+        "test_code": test_code,
+        "user_count": len(user_list),
+        "users": user_list
+    }
+    print(result)
+
+    return jsonify(result), 200
+
+
 
 
 if __name__ == '__main__':

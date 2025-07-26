@@ -21,7 +21,7 @@ const Login_admin = () => {
     });
 
     const data = await response.json();
-
+    localStorage.setItem('token',data.token)
     if (response.ok) {
       navigate("/admin", { state: { username } });
       // Successful login, redirect to the dashboard or admin page

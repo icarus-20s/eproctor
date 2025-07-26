@@ -13,6 +13,7 @@ import User from "./components/user.jsx";
 import UserTest from "./components/user_test.jsx";
 import Video from './components/video.jsx';
 import { TestProvider } from './components/Context.jsx';  // 👈 import context
+import ReviewLogs from './components/ReviewLogs.jsx';
 
 const router = createBrowserRouter([
   { path: '/', element: <App /> },
@@ -25,6 +26,7 @@ const router = createBrowserRouter([
   { path: '/test-page', element: <TestPage /> },
   { path: '/dashboard', element: <Dashboard /> },
   { path: '/video', element: <Video /> },
+  { path: '/log-review', element: <ReviewLogs /> },
 ]);
 
 ReactDOM.createRoot(document.getElementById('root')).render(

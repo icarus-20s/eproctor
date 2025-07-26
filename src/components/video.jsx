@@ -11,11 +11,18 @@ function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
     timestamp: ''
   });
 
+  const [eyeStatus, setEyeStatus] = useState({
+    direction: 'unknown',
+    noseTip: [],
+    leftEye: [],
+    rightEye: [],
+    timestamp: ''
+  });
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
 
-  // Start webcam stream
   useEffect(() => {
     const startWebcam = async () => {
       try {
@@ -38,13 +45,12 @@ function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
     };
   }, []);
 
-  // Send frame periodically
   useEffect(() => {
     if (!isActive || stopSignal) return;
 
     const intervalId = setInterval(() => {
       sendFrameToServer();
-    }, 3000); // Every 3 seconds
+    }, 2000); // Every 3 seconds
 
     return () => clearInterval(intervalId);
   }, [isActive, stopSignal, username, test_code]);
@@ -52,87 +58,94 @@ function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
   const sendFrameToServer = async () => {
     if (!streamRef.current || !videoRef.current || !canvasRef.current) return;
 
-    try {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
 
-      if (video.videoWidth === 0 || video.videoHeight === 0) return;
+    if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
 
-      const context = canvas.getContext('2d');
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const context = canvas.getContext('2d');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      canvas.toBlob(async (blob) => {
-        if (!blob || stopSignal) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob || stopSignal) return;
 
-        const formData = new FormData();
-        formData.append('frame', blob, 'frame.jpg');
-        formData.append('username', username);
-        formData.append('test_id', test_code);
+      const formData = new FormData();
+      formData.append('frame', blob, 'frame.jpg');
+      formData.append('username', username);
+      formData.append('test_id', test_code);
+      try {
+        // FACE ORIENTATION
+        const faceRes = await axios.post('http://localhost:5000/face-orientation', formData, {
+          timeout: 5000,
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
 
-        // Debugging the payload
-        for (let pair of formData.entries()) {
-          console.log(`${pair[0]}:`, pair[1]);
-        }
-
-        try {
-          const response = await axios.post('http://localhost:5000/face-orientation', formData, {
-            timeout: 5000,
-            headers: { 'Content-Type': 'multipart/form-data' }
+        if (faceRes.data && !stopSignal) {
+          setStatus({
+            orientation: faceRes.data.status,
+            faceCount: faceRes.data.face_count,
+            timestamp: faceRes.data.timestamp
           });
-
-          if (response.data && !stopSignal) {
-            setStatus({
-              orientation: response.data.status,
-              faceCount: response.data.face_count,
-              timestamp: response.data.timestamp
-            });
-          }
-        } catch (error) {
-          if (error.response) {
-            console.error('Backend error:', error.response.status, error.response.data);
-          } else {
-            console.error('Network or unexpected error:', error.message);
-          }
         }
-      }, 'image/jpeg', 0.8);
-    } catch (error) {
-      console.error('Error processing frame:', error);
-    }
+
+        // EYE DIRECTION
+        const eyeRes = await axios.post('http://localhost:5000/detect-eye', formData, {
+          timeout: 5000,
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (eyeRes.data && !stopSignal) {
+          setEyeStatus({
+            direction: eyeRes.data.status,
+            noseTip: eyeRes.data.nose_tip || [],
+            leftEye: eyeRes.data.eye_positions?.left_eye || [],
+            rightEye: eyeRes.data.eye_positions?.right_eye || [],
+            timestamp: eyeRes.data.timestamp
+          });
+        }
+      } catch (error) {
+        console.error('Detection error:', error.message);
+      }
+    }, 'image/jpeg', 0.8);
   };
 
   return (
-   <div className="p-6 max-w-xl mx-auto bg-white shadow-lg rounded-xl space-y-6">
-  <h2 className="text-2xl font-semibold text-center text-gray-800">Face Orientation Checker</h2>
+    <div className="p-6 max-w-xl mx-auto bg-white shadow-lg rounded-xl space-y-6">
+      <h2 className="text-2xl font-semibold text-center text-gray-800">Face & Eye Detection</h2>
 
-  <div className="flex justify-center">
-    <video
-      ref={videoRef}
-      autoPlay
-      muted
-      width="400"
-      height="300"
-      className="rounded-lg border border-gray-300 shadow-md"
-    />
-    <canvas ref={canvasRef} className="hidden" />
-  </div>
+      <div className="flex justify-center">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          width="400"
+          height="300"
+          className="rounded-lg border border-gray-300 shadow-md"
+        />
+        <canvas ref={canvasRef} className="hidden" />
+      </div>
 
-  <div className="bg-gray-100 p-4 rounded-lg">
-    <p className="text-lg text-gray-700">
-      <span className="font-bold text-gray-900">Face Count:</span> {status.faceCount}
-    </p>
-    <p className="text-lg text-gray-700">
-      <span className="font-bold text-gray-900">Orientation:</span> {status.orientation}
-    </p>
-    <p className="text-lg text-gray-700">
-      <span className="font-bold text-gray-900">Timestamp:</span> {status.timestamp}
-    </p>
-  </div>
-</div>
+      <div className="bg-gray-100 p-4 rounded-lg space-y-2">
+        <h3 className="font-semibold text-lg text-gray-800">Face Orientation</h3>
+        <p><strong>Orientation:</strong> {status.orientation}</p>
+        <p><strong>Face Count:</strong> {status.faceCount}</p>
+        <p><strong>Time:</strong> {status.timestamp}</p>
+      </div>
 
+      <div className="bg-gray-100 p-4 rounded-lg space-y-2">
+        <h3 className="font-semibold text-lg text-gray-800">Eye/Head Direction</h3>
+        <p><strong>Direction:</strong> {eyeStatus.direction}</p>
+        <p><strong>Nose Tip:</strong> {eyeStatus.noseTip.join(', ')}</p>
+        <p><strong>Left Eye:</strong> {eyeStatus.leftEye.join(', ')}</p>
+        <p><strong>Right Eye:</strong> {eyeStatus.rightEye.join(', ')}</p>
+        <p><strong>Time:</strong> {eyeStatus.timestamp}</p>
+      </div>
+    </div>
   );
 }
 
 export default FaceOrientationChecker;
+
