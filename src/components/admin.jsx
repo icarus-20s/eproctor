@@ -12,13 +12,13 @@ const Admin = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [testCode, setTestCode] = useState('');
   const location = useLocation();
-  const username = location.state?.username;
+  const username = location.state?.username || ''; // Get username from location state
   const navigate = useNavigate();
   const {logout} = useTestContext();
   console.log(username);
   useEffect(() => {
     if (!username) {
-      navigate("/login_admin"); // Redirect to login page
+      navigate("/login_admin");
     }
   }, [username, navigate]);
   // Initialize the navigation hook
@@ -26,9 +26,14 @@ const Admin = () => {
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);
   
-  const handleTestCodeChange = (e) => {
-    setTestCode(e.target.value);
-  };
+const handleTestCodeChange = (e) => {
+  const value = e.target.value;
+  // Only allow digits
+  if (/^\d*$/.test(value)) {
+    setTestCode(value);
+  }
+};
+
 
   const startTest = () => {
     // Handle starting the test logic

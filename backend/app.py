@@ -175,6 +175,7 @@ def face_orientation():
         return jsonify({"error": "No frame provided"}), 400
     username = request.form.get('username')
     test_id = int(request.form.get('test_id'))
+    print(test_id)
     # Create unique key for this user-test combination
     user_test_key = f"{username}_{test_id}"
 
@@ -298,7 +299,7 @@ def submit_test():
     answers = data.get('answers')
     ip_address = request.remote_addr
     session_login = data.get('session_login')
-
+    print(test_code)
     conn = get_db_connection()
     # Convert test_code to test_id (numeric)
     test = conn.execute('SELECT id FROM tests WHERE test_code = ?', (test_code,)).fetchone()
@@ -475,7 +476,7 @@ def log_suspicious_event(username, test_id, event_type, frame_np_array):
     if not username or not isinstance(test_id, int) or not event_type or frame_np_array is None:
         print(f"[ERROR] Invalid log input: username={username}, test_id={test_id}, event_type={event_type}")
         return
-
+    print(f"[DEBUG] Logging event: {event_type} for user: {username}, test_id: {test_id}")
     try:
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
         unique_id = uuid.uuid4().hex[:8]
@@ -557,7 +558,7 @@ def get_logs_json():
         params.append(int(test_id))
 
     query += ' ORDER BY timestamp DESC'
-
+    print(f"Executing query: {query} with params: {params}")
     conn = get_db_connection()
     cursor = conn.execute(query, params)
     rows = cursor.fetchall()
@@ -565,6 +566,17 @@ def get_logs_json():
 
     logs = [dict(row) for row in rows]
     return jsonify(logs)
+
+
+@app.route('/delete-logs', methods=['DELETE'])
+def delete_logs():
+    conn = get_db_connection()
+    conn.execute('DELETE FROM suspicious_events')
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "all logs deleted"})
+
+
 
 @app.route('/logs/<path:filename>')
 def get_log_image(filename):

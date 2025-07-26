@@ -89,6 +89,33 @@ const Dashboard = () => {
     }
   };
 
+  // Delete all logs (no filters)
+  const deleteAllLogs = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL logs? This action cannot be undone.')) {
+      return; // user cancelled
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('http://localhost:5000/delete-logs', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': getAuthToken(),
+        },
+      });
+      if (!response.ok) throw new Error('Failed to delete logs');
+      setSuspiciousEvents([]);  // clear UI immediately
+      alert('All logs deleted successfully.');
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchSuspiciousEvents();
+  }, []);
+
   const fetchUserSessions = async () => {
     try {
       const response = await fetch('http://localhost:5000/get-user-sessions', {
@@ -186,7 +213,7 @@ setTestUsers(usersAsObjects);
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('http://localhost:5000/delete-user-from-test', {
+      const response = await fetch('http://localhost:5000/delete-test', {
         method: 'DELETE',
         headers: {
           'Authorization': getAuthToken(),
@@ -214,7 +241,7 @@ setTestUsers(usersAsObjects);
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('http://localhost:5000//delete-user-from-test', {
+      const response = await fetch('http://localhost:5000/delete-user-from-test', {
         method: 'DELETE',
         headers: {
           'Authorization': getAuthToken(),
@@ -352,6 +379,7 @@ function formatTimestamp(timestamp) {
               <ArrowLeft className="w-4 h-4" />
               <span>Back to Dashboard</span>
             </button>
+
             
             {/* Test Header */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8">
@@ -450,6 +478,7 @@ function formatTimestamp(timestamp) {
                       <AlertTriangle className="w-5 h-5 text-red-600" />
                     </div>
                     <div>
+                      
                       <h2 className="text-xl font-semibold text-gray-900">Suspicious Activities</h2>
                       <p className="text-sm text-gray-500">{testSuspiciousEvents.length} incidents detected</p>
                     </div>
@@ -517,6 +546,18 @@ function formatTimestamp(timestamp) {
                   <Search className="w-5 h-5" />
                   <span>Search Logs</span>
                 </button>
+                <button
+                  onClick={deleteAllLogs}
+                  disabled={loading}
+                  className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
+                >
+                  <Settings className="w-5 h-5" />
+                  <span>Delete all logs</span>
+                </button>
+              
+                
+                
+
               </div>
             </div>
 

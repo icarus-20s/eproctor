@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 
-const test_code = localStorage.getItem('testCode');
-const username = localStorage.getItem('username');
-
 function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
+   const test_code = localStorage.getItem('testCode');
+  const username = localStorage.getItem('username');
   const [status, setStatus] = useState({
     orientation: 'unknown',
     faceCount: 0,
@@ -56,6 +55,7 @@ function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
   }, [isActive, stopSignal, username, test_code]);
 
   const sendFrameToServer = async () => {
+ 
     if (!streamRef.current || !videoRef.current || !canvasRef.current) return;
 
     const canvas = canvasRef.current;
@@ -76,6 +76,7 @@ function FaceOrientationChecker({ isActive = true, stopSignal = false }) {
       formData.append('frame', blob, 'frame.jpg');
       formData.append('username', username);
       formData.append('test_id', test_code);
+      console.log(test_code)
       try {
         // FACE ORIENTATION
         const faceRes = await axios.post('http://localhost:5000/face-orientation', formData, {

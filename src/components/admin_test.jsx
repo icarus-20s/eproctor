@@ -21,16 +21,24 @@ const TestPage = () => {
   };
 
   const handleAddOrNextQuestion = () => {
-    updateQuestion();
+  if (currentQuestionIndex === questions.length) {
+    // Add new question
+    setQuestions([...questions, { question: currentQuestion, options }]);
+  } else {
+    // Update existing question
+    const updatedQuestions = [...questions];
+    updatedQuestions[currentQuestionIndex] = {
+      question: currentQuestion,
+      options,
+    };
+    setQuestions(updatedQuestions);
+  }
 
-    if (currentQuestionIndex === questions.length) {
-      setQuestions([...questions, { question: currentQuestion, options }]);
-    }
+  setCurrentQuestion('');
+  setOptions(['', '', '', '']);
+  setCurrentQuestionIndex(prev => prev + 1);
+};
 
-    setCurrentQuestion('');
-    setOptions(['', '', '', '']);
-    setCurrentQuestionIndex(currentQuestionIndex + 1);
-  };
 
   const handlePrevQuestion = () => {
     if (currentQuestionIndex > 0) {
@@ -55,44 +63,42 @@ const TestPage = () => {
   };
 
 
-  const handleSubmit = async () => {
-    updateQuestion();  // Ensure the current question is updated in the array
-    console.log(updateQuestion)
-    if (currentQuestionIndex === questions.length) {
-      setQuestions([...questions, { question: currentQuestion, options }]);
-    }
-    const questionData = {
-        testCode: testCode,  // Replace with your actual test code logic
-        timer: 60,  // Replace with your actual timer value or state
-        questions: questions  // Array of questions you've collected
-    };
-
-    try {
-        // Make the POST request to your Flask backend
-        const response = await fetch('http://127.0.0.1:5000/create-test', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',  // Specify content type as JSON
-            },
-            body: JSON.stringify(questionData)  // Convert the questionData object to JSON
-        });
-
-        // Check if the request was successful
-        if (response.ok) {
-            const result = await response.json();  // Get the result from the backend
-            console.log("Submitted Questions: ", result);
-            alert("Test Submitted Successfully!");
-
-            // Redirect to the Dashboard component
-            navigate('/dashboard', { state: { testCode: questionData.testCode } });
-        } else {
-            throw new Error('Failed to submit questions');
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('There was an error submitting the questions. Please try again.');
-    }
+const handleSubmit = async () => {
+  const updatedQuestions = [...questions];
+  updatedQuestions[currentQuestionIndex] = {
+    question: currentQuestion,
+    options,
   };
+
+  const questionData = {
+    testCode: testCode,
+    timer: 60,
+    questions: updatedQuestions,
+  };
+
+  try {
+    const response = await fetch('http://127.0.0.1:5000/create-test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(questionData),
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log("Submitted Questions: ", result);
+      alert("Test Submitted Successfully!");
+      navigate('/dashboard', { state: { testCode: questionData.testCode } });
+    } else {
+      throw new Error('Failed to submit questions');
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    alert('There was an error submitting the questions. Please try again.');
+  }
+};
+
 
   const handleRemoveQuestion = (index) => {
     const updatedQuestions = questions.filter((_, i) => i !== index);

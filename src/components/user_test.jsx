@@ -37,6 +37,15 @@ const McqTest = () => {
 
   // Fetch IP address
   useEffect(() => {
+     navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        // Permission granted; stop tracks to avoid video feed
+        stream.getTracks().forEach(track => track.stop());
+        console.log('Camera permission granted');
+      })
+      .catch(err => {
+        console.error('Camera permission denied:', err);
+      });
     const fetchIp = async () => {
       try {
         const response = await fetch('https://api.ipify.org?format=json');

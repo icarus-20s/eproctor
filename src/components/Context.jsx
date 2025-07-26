@@ -73,8 +73,6 @@ const logout = (navigate) => {
   localStorage.removeItem('testCode');
   
   }
-
-
   // Fetch test data
   const fetchTestData = async (code) => {
     setError('');
