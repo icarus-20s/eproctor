@@ -21,7 +21,9 @@ import dlib
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor("./models/shape_predictor_68_face_landmarks.dat")
 # Load the YOLOv8 face model
-yolo_model = YOLO("./models/detect/train11/weights/best.pt")  # Update path if needed
+yolo_model = YOLO("./models/detect/train11/weights/best.pt") 
+phone_model =YOLO("./models/phone.pt")
+book_model =YOLO("./models/book.pt")
 
 # 3D model points
 model_points = np.array([
@@ -806,6 +808,81 @@ def get_users_by_test_code(test_code):
     return jsonify(result), 200
 
 
+
+@app.route('/detect-phone', methods=['POST'])
+def detect_phone_route():
+    file = request.files.get('frame')
+    username = request.form.get('username')
+    test_id = int(request.form.get('test_id'))
+
+    if not file or not username or not test_id:
+        return jsonify({"error": "Missing frame, username, or test_id"}), 400
+
+    # Step 2: Decode image
+    file_bytes = np.frombuffer(file.read(), np.uint8)
+    frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+    # Step 3: Run YOLO model
+    results = phone_model(frame)[0]
+    phone_detected = False
+
+    for box in results.boxes:
+        if int(box.cls[0]) == 67:  # class 67 = phone
+            phone_detected = True
+            print("Phone detected by YOLO")
+            break
+
+    current_time = datetime.now()
+
+    if phone_detected:
+        print(f"phone_detected for debug")
+        log_suspicious_event(username, test_id, "Phone Detected", frame)
+        detection_status = "Phone Detected"
+    else:
+        detection_status = "No Phone Detected"
+
+    return jsonify({
+        "status": detection_status,
+        "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+
+@app.route('/detect-book', methods=['POST'])
+def detect_book_route():
+    file = request.files.get('frame')
+    username = request.form.get('username')
+    test_id = int(request.form.get('test_id'))
+
+    if not file or not username or not test_id:
+        return jsonify({"error": "Missing frame, username, or test_id"}), 400
+
+    # Step 2: Decode image
+    file_bytes = np.frombuffer(file.read(), np.uint8)
+    frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+    # Step 3: Run YOLO model
+    results = book_model(frame)[0]
+    book_detected = False
+
+    for box in results.boxes:
+        if int(box.cls[0]) == 73:
+            book_detected = True
+            print("Phone detected by YOLO")
+            break
+
+    current_time = datetime.now()
+
+    if book_detected:
+        print(f"book_detected for debug")
+        log_suspicious_event(username, test_id, "Book Detected", frame)
+        detection_status = "Book Detected"
+    else:
+        detection_status = "No Book Detected"
+
+    return jsonify({
+        "status": detection_status,
+        "timestamp": current_time.strftime('%Y-%m-%d %H:%M:%S')
+    })
 
 
 if __name__ == '__main__':
