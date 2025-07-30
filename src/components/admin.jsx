@@ -30,7 +30,7 @@ const handleTestCodeChange = (e) => {
   const value = e.target.value;
   // Only allow digits
   if (/^\d*$/.test(value)) {
-    setTestCode(value);
+    setTestCode(value);b
   }
 };
 

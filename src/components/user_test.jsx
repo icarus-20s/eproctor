@@ -184,10 +184,9 @@ const McqTest = () => {
       if (data && data.questions && data.questions.length > 0) {
         setQuestions(data.questions);
         setIsTestStarted(true);
-        // Use setTimeout to ensure state is updated before entering fullscreen
-        // setTimeout(() => {
-        //   enterFullscreen();
-        // }, 100);
+        setTimeout(() => {
+          enterFullscreen();
+        }, 100);
       } else {
         alert('The test code you entered is invalid or no questions found. Please try again.');
         setQuestions([]);
