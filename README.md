@@ -1,7 +1,3 @@
-Sure, Icarus. Here's a simplified and professional version of your README:
-
----
-
 # Proctoring System
 
 A web-based proctoring system built with **Flask** (backend) and **React** (frontend) that enables secure test-taking with automated monitoring features.
