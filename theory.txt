@@ -1,0 +1,517 @@
+Below is a consolidated, paper‑ready description of your system. You can drop these sections (with minor editing) into the **System Design**, **Architecture**, and **Methodology** parts of your article.
+
+---
+
+## 1. System Overview
+
+We propose an **in‑browser proctoring system** that augments online exams with AI‑assisted invigilation. The platform combines:
+
+- **Real‑time computer‑vision–based monitoring** of the candidate’s face orientation, coarse gaze/head pose, and the presence of unauthorized objects (mobile phones and books).
+- A **browser‑side control layer** that enforces fullscreen mode, detects tab switching and prohibited key combinations.
+- A **resilient exam session management layer** that supports autosave and resume, and guards against deliberate disconnection.
+- A **web‑based frontend** for students and administrators, communicating with a Python backend via both REST (HTTP) and WebSockets.
+
+The backend is implemented using **Flask** and **Flask‑SocketIO**, and integrates three main subsystems:
+
+1. A **detection pipeline** built on YOLOv8, dlib, and OpenCV.
+2. A **proctoring communication layer** using Socket.IO for low‑latency, bidirectional messaging.
+3. A **data management layer** using a relational schema (implemented in SQLite, but compatible with MySQL) to store users, tests, exam sessions, and suspicious events.
+
+---
+
+## 2. System Architecture
+
+### 2.1 Backend Stack
+
+- **Web framework**: Flask (for REST APIs).
+- **Real‑time messaging**: Flask‑SocketIO (for `/proctor` namespace).
+- **Database**: Relational DB (SQLite in the prototype; schemas are MySQL‑compatible).
+- **Computer Vision stack**:
+  - YOLOv8 (via the Ultralytics library) for **multi‑class object detection**:
+    - Class 0: face.
+    - Class 1: book / paper notes.
+    - Class 2: mobile phone.
+  - dlib (68‑point facial landmark predictor) for **facial landmarks**.
+  - OpenCV for:
+    - Classical face detection fallback via **Haar cascade**.
+    - 3D head pose estimation using `solvePnP`.
+
+- **Authentication & roles**:
+  - A simple **token‑based** mechanism: the backend issues a urlsafe base64‑encoded JSON payload:
+    ```json
+    { "username": "alice", "role": "user" }
+    ```
+  - Token is used in an `Authorization: Bearer <token>` HTTP header.
+  - Role‑based decorators (e.g., `@role_required("admin")`) protect admin‑only endpoints (such as test reset and log review).
+
+### 2.2 Database Schema
+
+The core entities are:
+
+1. **users**
+   - `id` (PK), `username` (unique), `password` (bcrypt hash), `salt`, `role` (`admin` or `user`).
+   - Supports authentication and authorization.
+
+2. **tests**
+   - `id` (PK), `test_code` (unique string), `questions` (JSON), `timer` (integer, seconds), `is_test_started` (boolean).
+   - Encodes exam metadata and content.
+
+3. **user_test_sessions**
+   - `id` (PK), `username`, `test_id` (FK → `tests.id`), `answers` (JSON), `ip_address`, `session_login`.
+   - Stores final exam submissions for scoring and audit.
+
+4. **suspicious_events**
+   - `id` (PK), `username`, `test_id` (FK), `timestamp`, `event_type`, `frame_path` (relative path to screenshot).
+   - Records AI‑detected violations with visual evidence.
+
+5. **user_exam_sessions**
+   - `id` (PK), `username`, `test_id` (FK), `start_time`, `last_seen`,
+     `status` ∈ {`IN_PROGRESS`, `DISCONNECTED`, `SUBMITTED`, `TERMINATED`},
+     `remaining_time` (seconds), `last_answers` (JSON).
+   - Implements **resilient session tracking**, autosave, and resume.
+
+In a MySQL‑style schema, `suspicious_events` can be expressed as:
+
+```sql
+CREATE TABLE suspicious_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(255) NOT NULL,
+    test_id INT NOT NULL,
+    timestamp DATETIME NOT NULL,
+    event_type VARCHAR(255) NOT NULL,
+    frame_path VARCHAR(512),
+    CONSTRAINT fk_suspicious_test
+        FOREIGN KEY (test_id) REFERENCES tests(id)
+        ON DELETE CASCADE
+);
+```
+
+---
+
+## 3. Computer‑Vision Proctoring Pipeline
+
+The proctoring subsystem processes **discrete frames** sampled from the candidate’s webcam and derives a structured summary of potential violations.
+
+### 3.1 Frame Acquisition via WebSockets (Frame‑Based over Sockets)
+
+On the frontend (React):
+
+- The browser captures webcam video using `getUserMedia`.
+- Every **3 seconds**, the current frame is drawn into an off‑screen `<canvas>`.
+- The canvas is encoded as a JPEG data URL (`toDataURL("image/jpeg", 0.7)`).
+- This single frame is sent over **Socket.IO** as a `proctor_frame` event:
+
+```json
+{
+  "username": "student_id",
+  "test_id": 123,
+  "frame": "<base64-encoded JPEG>"
+}
+```
+
+Although we use WebSockets as the transport, **we do not stream continuous video**. Each `proctor_frame` message is a **self‑contained frame sample**, processed independently with no inter‑frame buffering. This design yields a **frame‑based pipeline** over a low‑latency, bidirectional channel.
+
+On the backend:
+
+- The `ws_proctor_frame` handler:
+  - Decodes the base64 JPEG into a BGR `numpy` array using `cv2.imdecode`.
+  - Invokes the detection pipeline (`detect_all_objects` and `run_proctor_checks`).
+  - Immediately responds with a `proctor_result` event containing the analysis for that frame.
+
+### 3.2 Multi‑Object Detection: YOLO + Haar Cascade
+
+The function `detect_all_objects(frame_bgr)` performs:
+
+1. **YOLOv8 inference**
+   - The YOLOv8 model is applied to the BGR frame.
+   - For each detection (bounding box + class ID):
+     - If `cls_id == 0` (face): store `(x, y, w, h)` in `face_boxes`.
+     - If `cls_id == 2` (phone): set `phone_detected = True`.
+     - If `cls_id == 1` (book): set `book_detected = True`.
+
+2. **Face fallback via Haar cascade**
+   - If `face_boxes` is empty, a Haar cascade (`haarcascade_frontalface_default.xml`) is run on the grayscale image.
+   - Detected rectangles are added to `face_boxes`.
+
+3. **Landmark rectangles for dlib**
+   - Each face bounding box `(x, y, w, h)` is converted to a `dlib.rectangle(x, y, x+w, y+h)` and stored in `dlib_rects`.
+
+The model uses the YOLO defaults for inference hyperparameters:
+
+- **Base confidence threshold** ≈ 0.25.
+- **NMS IoU threshold** ≈ 0.45.
+
+We then apply **post‑hoc, class‑specific thresholding** in evaluation (e.g. slightly higher effective confidence for faces, slightly lower for phones and books) based on validation data to improve tradeoffs between precision and recall per violation type.
+
+### 3.3 Face Presence and Orientation
+
+Let `face_count = len(face_boxes)`.
+
+1. **No face detected**
+   - If `face_count == 0`, the system uses a per‑user/test timer `face_disappearance_tracker[username_testid]`:
+     - On first missing frame, store the timestamp.
+     - On subsequent missing frames, compute `diff = now − last_face_time`.
+     - If `diff ≥ NO_FACE_TIMEOUT_SECONDS` (3 seconds), log the violation:
+       - `event_type = "No Face Detected"`.
+       - Save the current frame to disk and insert into `suspicious_events`.
+     - This temporal window prevents transient misdetections or brief occlusions from being treated as violations.
+
+2. **Multiple faces**
+   - If `face_count > 1`, the system logs `"Multiple Faces Detected"`.
+
+3. **Single face orientation**
+   - If `face_count == 1`, let `(x, y, w, h)` be the face bounding box.
+   - Compute:
+     - `face_center_x = x + w/2`.
+     - `frame_center_x = width/2`.
+     - `distance_from_center = |face_center_x − frame_center_x|`.
+   - If `distance_from_center > TURN_THRESHOLD_PX` (50 px):
+     - **Violation**: `"Face Turned Away"` is logged.
+   - Otherwise:
+     - Status: `"Facing Camera"`.
+
+This provides a coarse but effective measure of whether the candidate is centered on the screen.
+
+### 3.4 Head Pose and Gaze Proxy via Dlib + solvePnP
+
+We estimate **head pose** as a proxy for gaze direction:
+
+1. **Landmarks**
+   - Using a 68‑point dlib predictor, for the single face rectangle we extract:
+     - Nose tip (point 30)
+     - Chin (8)
+     - Left eye (36), right eye (45)
+     - Left mouth corner (48), right mouth corner (54)
+
+2. **3D–2D correspondences**
+   - Fixed 3D model points `MODEL_3D_POINTS` (nose, chin, eyes, mouth corners) define a canonical face model.
+   - The corresponding 2D image points define 3D–2D correspondences.
+
+3. **Camera model and pose**
+   - We assume a pinhole camera model with:
+     - Focal length ≈ frame width.
+     - Principal point = image center.
+   - `cv2.solvePnP` is used to estimate rotation (`rvec`) and translation (`tvec`), yielding the head pose relative to the camera.
+
+4. **Direction classification**
+   - We project a point (0, 0, 1000) in the model coordinate system (i.e., in front of the nose) into 2D.
+   - Let `nose_tip = image_points[0]`, `nose_proj` be the projected point.
+   - Compute:
+     - `dx = nose_proj.x − nose_tip.x`
+     - `dy = nose_proj.y − nose_tip.y`
+   - With thresholds:
+     - `HEAD_POSE_DX_THRESHOLD = 50 px`
+     - `HEAD_POSE_DY_THRESHOLD = 50 px`
+   - Classify:
+     - `dx > +50` → `"Looking Right"`
+     - `dx < −50` → `"Looking Left"`
+     - `dy > +50` → `"Looking Down"`
+     - Otherwise → `"Looking Center"`
+
+5. **Logging**
+   - Any label other than `"Looking Center"` is logged as a head‑pose violation, e.g., `"Looking Left (Head Pose)"`.
+   - These events are visible to instructors in the admin dashboard but are **not directly used to auto‑terminate exams**, due to potential false positives.
+
+Notably, the face detection and head pose estimation operate **synchronously on the same frame**. There is no temporal drift between modules.
+
+### 3.5 Object Detection: Phones and Books
+
+From YOLO’s detections:
+
+- If any bounding box has class `CLASS_ID_PHONE`:
+  - Set `phone_status = "Phone Detected"`.
+  - Log `"Phone Detected"` with frame evidence.
+- If any bounding box has class `CLASS_ID_BOOK`:
+  - Set `book_status = "Book Detected"`.
+  - Log `"Book Detected"` with frame evidence.
+
+These alerts appear in the student’s monitoring dashboard and are stored in the event log for later review.
+
+### 3.6 Aggregated CV Output
+
+For every processed frame, we produce an aggregated JSON object:
+
+```json
+{
+  "timestamp": "YYYY-MM-DD HH:MM:SS",
+  "face": {
+    "status": "Facing Camera" | "Face Turned Away" | "No Face Detected" | "Multiple Faces Detected",
+    "face_count": 0 | 1 | ...
+  },
+  "head_pose": {
+    "status": "Looking Center" | "Looking Left" | "Looking Right" | "Looking Down" | "Unavailable",
+    "nose_tip": [x, y] | null,
+    "rotation_vector": [...],
+    "eye_positions": {
+      "left_eye": [x_l, y_l],
+      "right_eye": [x_r, y_r]
+    } | null
+  },
+  "phone": { "status": "Phone Detected" | "No Phone Detected" },
+  "book":  { "status": "Book Detected" | "No Book Detected" }
+}
+```
+
+This structure is returned to the browser via `proctor_result` and drives the UI warnings.
+
+---
+
+## 4. Browser–Backend Interaction
+
+### 4.1 WebSocket Transport (Frame‑Based over Socket.IO)
+
+- The Socket.IO connection (`/proctor` namespace) is established when the monitoring component (`FaceOrientationChecker`) mounts.
+- Every ~3 seconds, the browser sends a **single frame** as a `proctor_frame` event.
+- The server processes it and emits a corresponding `proctor_result`.
+- There is:
+  - **No video buffering**.
+  - **No adaptive bitrate** or frame rate adaptation.
+  - A **fixed sampling interval** that trades off monitoring frequency and computational cost.
+
+Latency is typically low (tens to low hundreds of milliseconds round‑trip) and well within the 3‑second sampling interval, so no explicit buffering is required.
+
+### 4.2 REST Endpoints
+
+REST APIs are used for all non‑real‑time operations:
+
+- **Auth & users**:
+  - `POST /register`, `POST /login`.
+- **Test lifecycle**:
+  - `POST /create-test`, `GET /get-all-tests`,
+  - `POST /start-test`, `POST /end-test`,
+  - `POST /reset-test`, `DELETE /delete-test`,
+  - `GET /test/<test_code>/users`.
+- **Exam data**:
+  - `GET /get-test-data/<test_code>`,
+  - `POST /submit-test`.
+- **Resilience**:
+  - `POST /autosave-test`,
+  - `POST /resume-test`.
+- **Logging & review**:
+  - `GET /review-logs` (HTML overview),
+  - `GET /get-logs-json` (JSON logs),
+  - `DELETE /delete-logs`,
+  - `GET /logs/<path>` to serve evidence images.
+
+---
+
+## 5. Rule‑Based Decision Layer and Violation Types
+
+### 5.1 CV‑Based Violation Taxonomy
+
+The rule-based decision layer interprets model outputs into **human‑understandable violation types**:
+
+1. **Face presence**
+   - `No Face Detected` (continuous absence ≥ 3 seconds).
+   - `Multiple Faces Detected` (more than one face per frame).
+   - `Face Turned Away` (horizontal deviation > 50 px from center).
+
+2. **Head pose / gaze proxy**
+   - `Looking Left (Head Pose)`.
+   - `Looking Right (Head Pose)`.
+   - `Looking Down (Head Pose)`.
+   - (Non-violation): `Looking Center`.
+
+3. **Object presence**
+   - `Phone Detected` (YOLO class 2).
+   - `Book Detected` (YOLO class 1).
+
+Each event is logged into `suspicious_events` with type, timestamp, username, test_id, and `frame_path`.
+
+### 5.2 Browser‑Level Violation Types
+
+In parallel, the frontend enforces browser and UI rules:
+
+- **Fullscreen exit** during exam:
+  - Triggers a warning and countdown.
+- **Tab/window switching** while exam is active:
+  - Detected via `visibilitychange`.
+- **Forbidden key combinations**:
+  - `Esc`, `Alt+Tab`, `Ctrl+Tab`, and combinations involving `Ctrl`/`Meta` with common shortcuts (copy, select all, dev tools) are blocked and may trigger warnings.
+
+These are not logged in the same DB table, but they influence the **exam control logic** (warnings and auto‑submission).
+
+### 5.3 Escalation Policy and Warnings
+
+- **Browser level**:
+  - `remainingWarnings = 4`.
+  - On each fullscreen exit or tab switch:
+    - Show a modal warning with a 6‑second countdown.
+    - If the candidate does not return to fullscreen, **auto‑submit** the test.
+    - Decrement `remainingWarnings`.
+  - When `remainingWarnings` reaches 0:
+    - Any further infraction triggers **immediate auto‑submission**.
+
+- **Session level (backend)**:
+  - If `offline_seconds > MAX_OFFLINE_SECONDS` (300 s) or `remaining_time <= 0`:
+    - `user_exam_sessions.status` is set to `TERMINATED`.
+    - `/resume-test` returns `allowed = false` with a reason.
+
+- **CV level**:
+  - All CV-based violations (`No Face`, `Multiple Faces`, head pose, phone, book) are logged but do **not directly auto‑terminate** the exam in the current design. This avoids penalizing candidates for model false positives; final decisions are left to instructors.
+
+---
+
+## 6. Exam Session Management and Resilience
+
+The **`user_exam_sessions`** table provides robust session management.
+
+### 6.1 State Machine
+
+Each `(username, test_id)` maintains:
+
+- `IN_PROGRESS`: currently taking the exam.
+- `SUBMITTED`: exam successfully submitted.
+- `TERMINATED`: exam ended due to timeout or prolonged disconnection.
+- (`DISCONNECTED`: reserved for future refinement, not heavily used yet).
+
+Fields:
+
+- `remaining_time`: server‑trusted remaining seconds.
+- `last_seen`: updated on every autosave and frame processed by the proctor.
+- `last_answers`: most recent snapshot of answers.
+
+### 6.2 Autosave Algorithm
+
+Endpoint: `POST /autosave-test` with `{ username, test_code, answers, remaining_time }`.
+
+Algorithm (simplified):
+
+1. Resolve `test_id` from `test_code`.
+2. Get current time `now_iso`.
+3. `INSERT ... ON CONFLICT (username, test_id) DO UPDATE`:
+   - For new sessions: set `start_time = now_iso`, `last_seen = now_iso`, `status = 'IN_PROGRESS'`, `remaining_time`, `last_answers`.
+   - For existing sessions: update `last_seen`, `remaining_time`, `last_answers`.
+
+This runs periodically from the frontend (`McqTest`) every 30 seconds while the exam is active.
+
+### 6.3 Resume Algorithm
+
+Endpoint: `POST /resume-test` with `{ username, test_code }`.
+
+Algorithm:
+
+1. Resolve `test_id` from `test_code`.
+2. Fetch the corresponding row from `user_exam_sessions`.
+3. If no row exists → return `{ error: "No existing exam session." }`.
+4. If `status ∈ { SUBMITTED, TERMINATED }` → return `{ allowed: false, reason: "Exam already submitted/terminated." }`.
+5. Compute `offline_seconds = now − last_seen`.
+6. Adjust `remaining_time = max(remaining_time − offline_seconds, 0)`.
+7. If `offline_seconds > MAX_OFFLINE_SECONDS` or `remaining_time <= 0`:
+   - Update `status = 'TERMINATED'`.
+   - Return `{ allowed: false, reason: "Exam time expired or you were offline too long." }`.
+8. Else:
+   - Update `last_seen = now`, `status = 'IN_PROGRESS'`, `remaining_time` (adjusted).
+   - Return:
+     ```json
+     {
+       "allowed": true,
+       "remaining_time": remaining_time,
+       "last_answers": last_answers,
+       "status": "IN_PROGRESS"
+     }
+     ```
+
+On the frontend, when a user re‑enters the test code, we attempt to call `/resume-test`. If resume is allowed, we set the timer and answers from the response; if not (403 with a reason), we show the reason and do not start a new exam automatically.
+
+---
+
+## 7. Thresholds and Hyperparameters
+
+Several thresholds are chosen empirically:
+
+- **Face orientation**:
+  - `TURN_THRESHOLD_PX = 50` px.
+- **Head pose**:
+  - `HEAD_POSE_DX_THRESHOLD = 50` px (horizontal).
+  - `HEAD_POSE_DY_THRESHOLD = 50` px (vertical).
+- **Face absence timeout**:
+  - `NO_FACE_TIMEOUT_SECONDS = 3` s.
+- **Offline timeout**:
+  - `MAX_OFFLINE_SECONDS = 300` s.
+- **Fullscreen violations**:
+  - `remainingWarnings = 4` (max warnings before immediate termination).
+  - Countdown per violation = 6 s.
+
+These values are derived from pilot experiments:
+
+- For head pose and face orientation, we measured deviations while participants alternated between “looking at the screen” and “looking away” and selected thresholds above the 95th percentile of deviations seen in genuine “looking center” behavior.
+- For face absence and offline durations, we chose values that accommodate realistic transient failures (e.g., brief lighting changes, brief network outages) while still discouraging prolonged cheating attempts.
+
+---
+
+## 8. Frontend Behavior and Integration
+
+### 8.1 Student Side
+
+- **Docs / Landing**:
+  - Presents system description and links to **User Login**, **Admin Login**, and **Register**.
+- **Login & Register**:
+  - Users and admins register via `/register` with a chosen role.
+  - On login, the frontend decodes the token payload to set username and role in a shared context.
+- **User Dashboard**:
+  - Displays a welcome message and exam guidelines.
+  - “Start Exam” navigates to the MCQ test interface (`McqTest`) with username in state.
+- **MCQ Test Interface**:
+  - Fetches test data via `/get-test-data/<test_code>`.
+  - Uses server timer as initial countdown.
+  - Manages answer navigation and local/UI restrictions (fullscreen, keyboard, tab switching).
+  - Periodically autosaves via `/autosave-test`.
+  - On reconnection or reload, attempts `/resume-test` to restore remaining time and answers.
+  - Embeds the Webcam Proctor dashboard (`FaceOrientationChecker`), which shows:
+    - Face orientation and count (green/red status dot).
+    - Head pose (gaze proxy).
+    - Phone and book detection status.
+    - Warning toasts for suspicious behavior.
+
+### 8.2 Admin Side
+
+- **Admin Landing**:
+  - After login, admin sees an overview page with:
+    - Profile card.
+    - Quick action cards (e.g., “Create Test”, “Open Monitoring Dashboard”).
+- **Test Creation Page**:
+  - Supports adding/editing/removing multiple‑choice questions for a given `test_code`.
+  - Upon submission, sends `POST /create-test`.
+- **Admin Dashboard**:
+  - Displays summary statistics:
+    - Total tests, active tests, active users, total incidents.
+    - Incident counts per type (face, phone, book, head pose).
+  - Lists all tests with controls:
+    - Start/Stop.
+    - Delete.
+    - View details (registered users and test‑specific incidents).
+  - Shows recent global suspicious activities with filters (by type and search term).
+  - Groups active user sessions by test ID using `/get-user-sessions`.
+  - Provides access to a dedicated **Log Review** page:
+    - `ReviewLogs` component queries `/get-logs-json?username=&test_id=` and lists incidents with thumbnails and timestamps.
+
+---
+
+## 9. Evaluation Notes (for Inclusion)
+
+In the evaluation section of the paper, you should:
+
+- Report **alert precision per violation type**:
+  - For each class (No Face, Multiple Faces, Face Turned Away, head pose, Phone, Book):
+    - Number of alerts.
+    - Number of true positives (via manual annotation).
+    - Precision = TP / alerts.
+- Report **false positive rates** for gaze/head pose violations (when users are actually looking at the screen).
+- Discuss **latency**:
+  - Typical round‑trip time between frame capture and `proctor_result`.
+- Discuss **resource usage**:
+  - Approximate CPU/GPU load when monitoring N students at the default 3‑second sampling interval.
+
+---
+
+This integrated description covers:
+
+- System architecture and components (backend, frontend, data).
+- Detection algorithms and thresholds (YOLO, dlib, head pose).
+- Violation taxonomy and rule‑based decision logic.
+- Browser‑backend interaction model (frame‑based pipeline over WebSockets).
+- Exam session management (autosave and resume, offline handling).
+- Escalation policy and how warnings lead to potential exam termination.
+
+You can now map these sections directly into **System Design**, **Methodology**, and **Implementation** chapters of your article, adding figures (e.g., pipeline diagrams, DB schemas) and empirical results as needed.

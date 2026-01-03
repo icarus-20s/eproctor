@@ -1,88 +1,137 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import logo from '../assets/logoexam.jpg'
+import logo from "../assets/logoexam.jpg";
 
 const Login_admin = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Decode our backend's urlsafe base64 token payload
+  const decodeTokenPayload = (token) => {
+    try {
+      const base64 = token.replace(/-/g, "+").replace(/_/g, "/");
+      const json = atob(base64);
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    setLoading(true);
 
-    // Send a POST request to log in
-    const response = await fetch("http://127.0.0.1:5000/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const response = await fetch("http://127.0.0.1:5000/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
 
-    const data = await response.json();
-    localStorage.setItem('token',data.token)
-    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setError(data.message || "Login failed. Please check your credentials.");
+        setLoading(false);
+        return;
+      }
+
+      if (!data.token) {
+        setError("Login response did not contain a token.");
+        setLoading(false);
+        return;
+      }
+
+      // Enforce admin role from token payload
+      const payload = decodeTokenPayload(data.token);
+      if (!payload || payload.role !== "admin") {
+        setError("You are not authorized to access the admin panel.");
+        setLoading(false);
+        return;
+      }
+
+      // Store token and username
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("username", username);
+
       navigate("/admin", { state: { username } });
-      // Successful login, redirect to the dashboard or admin page
-    } else {
-      // Display error message
-      setError(data.error || "Login failed");
+    } catch (err) {
+      console.error("Admin login error:", err);
+      setError("Unable to reach the server. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-      <div className="flex flex-col items-center justify-center min-h-screen  text-gray-200 ">
-        <img className=" w-24 h-24 rounded-full m-8" alt="Logo" src={logo}>
-        </img>
-        <h1 className="font-Zen font-medium text-end text-3xl mb-2 text-black  ">ProctoringAI</h1>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-white text-gray-900">
+      <img className="w-24 h-24 rounded-full m-8" alt="Logo" src={logo} />
+      <h1 className="font-Zen font-medium text-3xl mb-2 text-black">
+        ProctoringAI
+      </h1>
 
-        <div className="w-80 rounded-lg bg-gray-100 p-8">
-          <p className="text-center text-xl font-bold font-Orbitron text-black">Admin Login</p>
-          <form className="mt-6" onSubmit={handleSubmit}>
-            <div className="mt-1 text-sm">
-              <label htmlFor="username" className="block text-gray-900 font-Lex mb-2">
-                Username:
-              </label>
-              <input
-                  type="text"
-                  name="username"
-                  id="username"
-                  placeholder=""
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full rounded-md border border-gray-600  px-3 py-2 text-black focus:border-indigo-400 focus:outline-none"
-                  required
-              />
-            </div>
-            <div className="mt-4 text-sm">
-              <label htmlFor="password" className="block text-black font-Lex  mb-2">
-                Password:
-              </label>
-              <input
-                  type="password"
-                  name="password"
-                  id="password"
-                  placeholder=""
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-md border border-gray-600  px-3 py-2 text-black focus:border-indigo-400 focus:outline-none"
-                  required
-              />
-              <div className="flex justify-end mt-2 text-xs text-gray-400">
-
-              </div>
-            </div>
-            <button
-                type="submit"
-                className="mt-6 w-full rounded-md bg-black py-2 text-white font-semibold hover:bg-indigo-950"
+      <div className="w-80 rounded-lg bg-gray-100 p-8 shadow-xl">
+        <p className="text-center text-xl font-bold font-Orbitron text-black">
+          Admin Login
+        </p>
+        <form className="mt-6" onSubmit={handleSubmit}>
+          <div className="mt-1 text-sm">
+            <label
+              htmlFor="username"
+              className="block text-gray-900 font-Lex mb-2"
             >
-              Sign in
-            </button>
-          </form>
-          {error && <p className="text-red-500">{error}</p>} {/* Display error message */}
-        </div>
+              Username:
+            </label>
+            <input
+              type="text"
+              name="username"
+              id="username"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full rounded-md border border-gray-600 px-3 py-2 text-black focus:border-indigo-400 focus:outline-none"
+              required
+            />
+          </div>
+          <div className="mt-4 text-sm">
+            <label
+              htmlFor="password"
+              className="block text-black font-Lex mb-2"
+            >
+              Password:
+            </label>
+            <input
+              type="password"
+              name="password"
+              id="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-md border border-gray-600 px-3 py-2 text-black focus:border-indigo-400 focus:outline-none"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="mt-6 w-full rounded-md bg-black py-2 text-white font-semibold hover:bg-indigo-950 disabled:opacity-60"
+          >
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
+        </form>
+        {error && (
+          <p className="mt-3 text-sm text-red-600 font-medium text-center">
+            {error}
+          </p>
+        )}
       </div>
+    </div>
   );
 };
 
